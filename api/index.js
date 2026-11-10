@@ -5,7 +5,10 @@ import { baseUrl, readBody, sendJson, sendHtml } from "../lib/http.js";
 
 export default async function handler(req, res) {
   const url = new URL(req.url, "http://x");
-  const path = url.pathname.replace(/\/+$/, "") || "/";
+  // On Vercel every path is rewritten to /api; the original path arrives as ?__path= (see vercel.json).
+  const original = url.searchParams.get("__path");
+  url.searchParams.delete("__path");
+  const path = (original ?? url.pathname).replace(/\/+$/, "") || "/";
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version");
