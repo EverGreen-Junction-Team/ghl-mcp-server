@@ -2,7 +2,7 @@
 import { handleMcp } from "../lib/mcp.js";
 import { protectedResourceMetadata, authServerMetadata, register, authorize, install, callback, token } from "../lib/oauth.js";
 import { signInStep } from "../lib/signin.js";
-import { page, brandName } from "../lib/pages.js";
+import { page, productName } from "../lib/pages.js";
 import { baseUrl, readBody, sendJson } from "../lib/http.js";
 
 export default async function handler(req, res) {
@@ -47,9 +47,9 @@ export default async function handler(req, res) {
         return await token(req, res);
       case "/":
         return page(res, {
-          title: "AI connector",
+          title: "Connect",
           body:
-            `<h1>${brandName()} AI connector</h1><p>Add this URL as a custom connector in Claude:</p><pre>${baseUrl(req)}/mcp</pre>` +
+            `<h1>${productName()}</h1><p>Add this URL as a custom connector in Claude:</p><pre>${baseUrl(req)}/mcp</pre>` +
             `<p>You'll sign in with your work email, and only the tools your permissions allow will be available.</p>`,
         });
       case "/health":
