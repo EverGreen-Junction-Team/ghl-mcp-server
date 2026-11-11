@@ -2,7 +2,7 @@
 import { handleMcp } from "../lib/mcp.js";
 import { protectedResourceMetadata, authServerMetadata, register, authorize, install, callback, token } from "../lib/oauth.js";
 import { signInStep } from "../lib/signin.js";
-import { page, productName } from "../lib/pages.js";
+import { page, errorPage, productName } from "../lib/pages.js";
 import { baseUrl, readBody, sendJson } from "../lib/http.js";
 
 export default async function handler(req, res) {
@@ -35,7 +35,14 @@ export default async function handler(req, res) {
         req.body = await readBody(req);
         return register(req, res);
       case "/authorize":
-        if (req.method === "POST") return await signInStep(req, res, await readBody(req));
+        if (req.method === "POST") {
+          try {
+            return await signInStep(req, res, await readBody(req));
+          } catch (e) {
+            console.error(e);
+            return errorPage(res, e.message, 500);
+          }
+        }
         return authorize(req, res, url.searchParams);
       case "/install":
         return install(req, res);
