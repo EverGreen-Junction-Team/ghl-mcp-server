@@ -1,7 +1,9 @@
 // Single entry point; vercel.json rewrites every path here.
 import { handleMcp } from "../lib/mcp.js";
-import { protectedResourceMetadata, authServerMetadata, register, authorize, callback, token } from "../lib/oauth.js";
-import { baseUrl, readBody, sendJson, sendHtml } from "../lib/http.js";
+import { protectedResourceMetadata, authServerMetadata, register, authorize, install, callback, token } from "../lib/oauth.js";
+import { signInStep } from "../lib/signin.js";
+import { page, brandName } from "../lib/pages.js";
+import { baseUrl, readBody, sendJson } from "../lib/http.js";
 
 export default async function handler(req, res) {
   const url = new URL(req.url, "http://x");
@@ -33,7 +35,10 @@ export default async function handler(req, res) {
         req.body = await readBody(req);
         return register(req, res);
       case "/authorize":
+        if (req.method === "POST") return await signInStep(req, res, await readBody(req));
         return authorize(req, res, url.searchParams);
+      case "/install":
+        return install(req, res);
       case "/callback":
         return await callback(req, res, url.searchParams);
       case "/token":
@@ -41,12 +46,12 @@ export default async function handler(req, res) {
         req.body = await readBody(req);
         return await token(req, res);
       case "/":
-        return sendHtml(
-          res,
-          200,
-          `<h2>HighLevel MCP</h2><p>Add this URL as a custom connector in Claude:</p><pre>${baseUrl(req)}/mcp</pre>` +
-            `<p>You'll sign in with HighLevel, and only the tools your HighLevel user is allowed to use will be available.</p>`
-        );
+        return page(res, {
+          title: "AI connector",
+          body:
+            `<h1>${brandName()} AI connector</h1><p>Add this URL as a custom connector in Claude:</p><pre>${baseUrl(req)}/mcp</pre>` +
+            `<p>You'll sign in with your work email, and only the tools your permissions allow will be available.</p>`,
+        });
       case "/health":
         return sendJson(res, 200, { ok: true });
     }
