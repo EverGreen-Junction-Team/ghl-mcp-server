@@ -1,6 +1,6 @@
 // Single entry point; vercel.json rewrites every path here.
 import { handleMcp } from "../lib/mcp.js";
-import { protectedResourceMetadata, authServerMetadata, register, authorize, install, callback, token } from "../lib/oauth.js";
+import { protectedResourceMetadata, authServerMetadata, register, authorize, install, callback, token, revoke } from "../lib/oauth.js";
 import { signInStep } from "../lib/signin.js";
 import { page, errorPage, productName } from "../lib/pages.js";
 import { baseUrl, readBody, sendJson } from "../lib/http.js";
@@ -52,6 +52,10 @@ export default async function handler(req, res) {
           }
         }
         return authorize(req, res, url.searchParams);
+      case "/revoke":
+        if (req.method !== "POST") break;
+        req.body = await readBody(req);
+        return await revoke(req, res);
       case "/install":
         return install(req, res);
       case "/callback":

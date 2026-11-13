@@ -19,7 +19,7 @@ alter table public.mcp_agency enable row level security;
 create table if not exists public.mcp_audit_log (
   id           bigint generated always as identity primary key,
   at           timestamptz not null default now(),
-  event        text not null,          -- sign_in, sign_in_denied, code_sent, code_failed, tool_call, tool_denied, agency_installed, reconnect_denied
+  event        text not null,          -- sign_in, sign_in_denied, code_sent, code_failed, tool_call, tool_denied, agency_installed, reconnect_denied, disconnected
   user_id      text,
   user_email   text,
   user_name    text,
@@ -39,6 +39,16 @@ create index if not exists mcp_audit_log_at_idx on public.mcp_audit_log (at desc
 create index if not exists mcp_audit_log_user_idx on public.mcp_audit_log (user_id, at desc);
 create index if not exists mcp_audit_log_location_idx on public.mcp_audit_log (location_id, at desc);
 
+-- Disconnected sign-ins (one row per "Disconnect" in the AI app). Their tokens stop working.
+create table if not exists public.mcp_revoked (
+  gid          text primary key,
+  user_id      text,
+  location_id  text,
+  client       text,
+  revoked_at   timestamptz not null default now()
+);
+alter table public.mcp_revoked enable row level security;
+
 -- Handy view for the Supabase table editor: newest first, readable columns.
 -- security_invoker keeps the table's RLS in force, so the view isn't public either.
 create or replace view public.mcp_activity with (security_invoker = true) as
@@ -46,4 +56,4 @@ select at, event, user_name, user_email, location_name, tool, ok, error, args, d
 from public.mcp_audit_log
 order by at desc;
 
-revoke all on public.mcp_agency, public.mcp_audit_log, public.mcp_activity from anon, authenticated;
+revoke all on public.mcp_agency, public.mcp_audit_log, public.mcp_activity, public.mcp_revoked from anon, authenticated;

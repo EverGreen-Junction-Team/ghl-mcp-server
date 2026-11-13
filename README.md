@@ -31,7 +31,9 @@ Every call: token ──▶ GET /users/{userId} ──▶ permissions ──▶ 
   taken off a sub-account, are blocked on their next call and can't renew their connection.
 - **Activity log:** Supabase table `mcp_audit_log` (view `mcp_activity`, newest first). Events:
   `sign_in`, `sign_in_denied`, `code_sent`, `code_failed`, `tool_call`, `tool_denied`,
-  `reconnect_denied`, `agency_installed`. Tool arguments are stored (truncated at 4,000 chars).
+  `reconnect_denied`, `agency_installed`, `disconnected`. Tool arguments are stored (truncated at 4,000 chars).
+- **Disconnect:** removing or disconnecting the connector in Claude calls `/revoke`, which records
+  the sign-in in `mcp_revoked`; its tokens stop working right away (checked on every call and refresh).
 
 ## Connect (users)
 
