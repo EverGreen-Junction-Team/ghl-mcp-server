@@ -4,6 +4,14 @@ import { protectedResourceMetadata, authServerMetadata, register, authorize, ins
 import { signInStep } from "../lib/signin.js";
 import { page, errorPage, productName } from "../lib/pages.js";
 import { baseUrl, readBody, sendJson } from "../lib/http.js";
+import { LOGO_SVG, LOGO_PNG } from "../lib/brand.js";
+
+function sendAsset(res, type, data) {
+  res.statusCode = 200;
+  res.setHeader("Content-Type", type);
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.end(data);
+}
 
 export default async function handler(req, res) {
   const url = new URL(req.url, "http://x");
@@ -59,6 +67,10 @@ export default async function handler(req, res) {
             `<h1>${productName()}</h1><p>Add this URL as a custom connector in Claude:</p><pre>${baseUrl(req)}/mcp</pre>` +
             `<p>You'll sign in with your work email, and only the tools your permissions allow will be available.</p>`,
         });
+      case "/logo.svg":
+        return sendAsset(res, "image/svg+xml", LOGO_SVG);
+      case "/logo.png":
+        return sendAsset(res, "image/png", LOGO_PNG);
       case "/health":
         return sendJson(res, 200, { ok: true });
     }

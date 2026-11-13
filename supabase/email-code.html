@@ -2,14 +2,17 @@
   Paste into Supabase > Authentication > Emails > Templates, in BOTH "Magic Link" and "Confirm signup"
   (first-time users get "Confirm signup", returning users get "Magic Link").
   Subject: Your EverGreen MCP Connector sign-in code
+  The logo is served by this server at /logo.png (PNG, since most mail apps don't show SVG).
+  If your BASE_URL isn't https://mcp.evergreenjunction.com, change the image address below.
 -->
-<div style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#0f1f17">
-  <div style="font-weight:600;font-size:17px;margin-bottom:24px">
-    <span style="display:inline-block;width:28px;height:28px;border-radius:8px;background:#1f9d55;vertical-align:middle;margin-right:8px"></span>
-    EverGreen MCP Connector
+<div style="background:#f7f4f2;padding:32px 16px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111111">
+  <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #e6dfda;border-top:4px solid #ef6841;border-radius:16px;padding:28px 28px 32px">
+    <img src="https://mcp.evergreenjunction.com/logo.png" width="170" height="48" alt="EverGreen Junction" style="display:block;width:170px;height:auto;border:0;margin:0 0 6px">
+    <div style="font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#5f5955;margin:0 0 24px">EverGreen MCP Connector</div>
+    <h1 style="font-size:20px;line-height:1.3;margin:0 0 8px;color:#111111">Your sign-in code</h1>
+    <p style="color:#5f5955;margin:0 0 20px;font-size:15px;line-height:1.5">Enter this code to connect your AI assistant. It expires in a few minutes.</p>
+    <div style="font-size:32px;font-weight:700;letter-spacing:8px;background:#fdf0eb;color:#111111;border:1px solid #f6cdbf;border-radius:12px;padding:16px;text-align:center">{{ .Token }}</div>
+    <p style="color:#5f5955;font-size:13px;line-height:1.5;margin:24px 0 0">If you didn't try to sign in, you can ignore this email.</p>
   </div>
-  <h1 style="font-size:20px;margin:0 0 8px">Your EverGreen MCP Connector code</h1>
-  <p style="color:#5b6b62;margin:0 0 20px">Enter this code to connect your AI assistant. It expires in a few minutes.</p>
-  <div style="font-size:32px;font-weight:700;letter-spacing:8px;background:#f3f6f4;border-radius:12px;padding:16px;text-align:center">{{ .Token }}</div>
-  <p style="color:#5b6b62;font-size:13px;margin:24px 0 0">If you didn't try to sign in, you can ignore this email.</p>
+  <p style="max-width:480px;margin:16px auto 0;text-align:center;font-size:12px;color:#8a817b">Secure sign-in by EverGreen Junction</p>
 </div>
