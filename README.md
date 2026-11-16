@@ -8,7 +8,7 @@ permissions allow. Every sign-in and tool call is logged per user.
 Claude ──▶ /mcp (401) ──▶ /authorize (EverGreen page)
             email ──▶ is this an active agency user?  (HighLevel, via the agency connection)
             6-digit code by email                      (Supabase Auth)
-            pick sub-account (only theirs, app installed)
+            pick sub-accounts (only theirs, app installed) — one, several, or all
             ──▶ sub-account token from the agency connection ──▶ back to Claude
 
 Every call: token ──▶ GET /users/{userId} ──▶ permissions ──▶ filter tools/list, block tools/call
@@ -26,12 +26,18 @@ Every call: token ──▶ GET /users/{userId} ──▶ permissions ──▶ 
   social planner, blogs, emails, forms, workflows, Voice AI, custom objects, ...), like HighLevel's
   own MCP server. Each user only finds and runs the operations their HighLevel permissions and
   role scopes allow (see "Operation catalog" below).
+- **One connection, several sub-accounts:** at sign-in a user ticks every sub-account the
+  assistant should work in, or "all" to follow their HighLevel access as it changes. Every tool
+  then takes `locationId`, and `list_locations` shows the options. Reads fall back to the first
+  sub-account picked; **anything that changes data must name one**, so the assistant can't quietly
+  write to the wrong client. A single-sub-account connection behaves exactly as before.
 - **Only assigned data:** users with `assignedDataOnly` only see and change records assigned to them.
 - **Always current:** permissions are read live (cached 60 seconds). Removed users, or users
   taken off a sub-account, are blocked on their next call and can't renew their connection.
 - **Activity log:** Supabase table `mcp_audit_log` (view `mcp_activity`, newest first). Events:
   `sign_in`, `sign_in_denied`, `code_sent`, `code_failed`, `tool_call`, `tool_denied`,
-  `reconnect_denied`, `agency_installed`, `disconnected`. Tool arguments are stored (truncated at 4,000 chars).
+  `reconnect_denied`, `agency_installed`, `disconnected`. Each row records the sub-account the
+  call actually ran in. Tool arguments are stored (truncated at 4,000 chars).
 - **Disconnect:** removing or disconnecting the connector in Claude calls `/revoke`, which records
   the sign-in in `mcp_revoked`; its tokens stop working right away (checked on every call and refresh).
 
@@ -101,7 +107,9 @@ can do everything, so these checks are what limits each user:
 3. **Assigned data only.** Users limited to assigned records can't use catalog operations for
    contacts, opportunities, conversations or calendars; the built-in tools filter to their records.
 4. **Locked to the sub-account.** `locationId`/`altId` (and `companyId`) are always filled in from
-   the connection; a request naming any other sub-account is refused.
+   the sub-account the call is for; a request naming any other one is refused. Where a connection
+   covers several, the sub-account comes from the call's own `locationId`, which is checked against
+   both the connection and the user's current HighLevel access.
 5. **Confirmation.** Deleting, sending, charging, refunding, bulk and similar operations only run
    with `confirm: true`, which the AI is told to set only after the user confirms.
 
