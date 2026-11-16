@@ -72,12 +72,21 @@ npm run dev
 
 | Tool | Needs permission |
 |---|---|
-| whoami | none |
+| whoami, list_locations, list_users | none |
 | search_contacts, get_contact, create_contact, update_contact, add_contact_note | contactsEnabled |
-| list_pipelines, search_opportunities, create_opportunity | opportunitiesEnabled |
+| list_pipelines, search_opportunities, create_opportunity, update_opportunity | opportunitiesEnabled |
 | search_conversations, get_conversation_messages, send_message | conversationsEnabled |
 | list_calendars, get_calendar_events | appointmentsEnabled |
 | search_operations, describe_operation, execute_operation | per operation (below) |
+
+Contacts and opportunities take `assignedTo` (a user ID from `list_users`) to set who owns the
+record, including moving one to a colleague. A user limited to their own records can't hand a
+record to someone else — that would put it out of their reach — so those stay with them.
+
+`update_opportunity` moves a deal between stages or pipelines, sets its value or status, and
+reassigns it. It exists as a built-in tool because users limited to their own records can't reach
+the catalog's opportunity operations: the catalog can't tell which records are theirs, while this
+tool checks the deal before changing it.
 
 To add a tool, add an entry to `TOOLS` in `lib/tools.js` with its `permission`.
 
