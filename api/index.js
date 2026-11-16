@@ -1,5 +1,6 @@
 // Single entry point; vercel.json rewrites every path here.
 import { handleMcp } from "../lib/mcp.js";
+import { TOOLS } from "../lib/tools.js";
 import { protectedResourceMetadata, authServerMetadata, register, authorize, install, callback, token, revoke } from "../lib/oauth.js";
 import { signInStep } from "../lib/signin.js";
 import { page, errorPage, productName } from "../lib/pages.js";
@@ -76,7 +77,12 @@ export default async function handler(req, res) {
       case "/logo.png":
         return sendAsset(res, "image/png", LOGO_PNG);
       case "/health":
-        return sendJson(res, 200, { ok: true });
+        // The commit and when it went out, so you can tell whether a fix is actually live.
+        return sendJson(res, 200, {
+          ok: true,
+          commit: (process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7) || null,
+          tools: TOOLS.map((t) => t.name),
+        });
     }
     sendJson(res, 404, { error: "Not found" });
   } catch (e) {
