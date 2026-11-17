@@ -7,6 +7,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "dev": "node server.js",
-    "build:catalog": "node scripts/build-catalog.js"
+    "build:catalog": "node scripts/build-catalog.js",
+    "test": "node test/e2e.mjs && node test/revoke-test.mjs && node test/multi.mjs"
   }
 }
