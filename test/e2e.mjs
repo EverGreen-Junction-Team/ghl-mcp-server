@@ -156,6 +156,9 @@ ok(!p2.err && last().method === "DELETE" && last().query.locationId === "loc1", 
 
 const w = await call("sales", "whoami", {});
 ok(typeof w.data.catalogOperationsAvailable === "number", "whoami reports catalog count: " + w.data.catalogOperationsAvailable);
+// There is no agency row to read here. whoami is what people reach for when something is
+// already wrong, so a scope check it can't make must not take the whole tool down with it.
+ok(w.data.appScopes.granted === null && typeof w.data.appScopes.note === "string", "whoami still answers when the app's scopes can't be read");
 
 // ---------- assigning records to people ----------
 const u1 = await call("admin", "list_users", {});

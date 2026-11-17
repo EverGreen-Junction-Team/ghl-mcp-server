@@ -16,6 +16,12 @@ Object.assign(process.env, {
   GHL_CLIENT_ID: "app123-xyz",
 });
 
+// An install that was set up properly except for one scope -- the shape of a real report,
+// where every user permission looked right and sub-account task search still failed.
+const WITHHELD_SCOPE = "locations/tasks.readonly";
+const { GHL_SCOPES } = await import(`${REPO}/lib/ghl.js`);
+const GRANTED_SCOPES = GHL_SCOPES.filter((s) => s !== WITHHELD_SCOPE).join(" ");
+
 const perms = { contactsEnabled: true, opportunitiesEnabled: true, paymentsEnabled: true, settingsEnabled: true };
 const USERS = {
   // Reaches three sub-accounts.
@@ -53,7 +59,7 @@ http.createServer((req, res) => {
     const u = new URL(req.url, "http://x");
     res.setHeader("Content-Type", "application/json");
     if (u.pathname === "/rest/v1/mcp_agency") {
-      return res.end(JSON.stringify([{ company_id: "comp1", access_token: "agency-at", refresh_token: "r", expires_at: new Date(Date.now() + 864e5).toISOString() }]));
+      return res.end(JSON.stringify([{ company_id: "comp1", access_token: "agency-at", refresh_token: "r", scope: GRANTED_SCOPES, expires_at: new Date(Date.now() + 864e5).toISOString() }]));
     }
     if (req.method === "POST") { res.statusCode = 201; return res.end(""); }
     res.end("[]");
@@ -148,6 +154,16 @@ ok(shrunkList.subAccounts.map((l) => l.id).join(",") === "loc1", "list_locations
 const me = (await call(pair, "whoami")).data;
 ok(me.connectedSubAccounts.length === 2 && me.locationName === "Acme", "whoami: reports the connected sub-accounts");
 ok(!(await call(single, "whoami")).data.connectedSubAccounts, "whoami: says nothing extra for one sub-account");
+
+// The app's granted scopes are a separate gate from the user's permissions, and a missing one
+// fails upstream at HighLevel with nothing on this side to explain it. whoami should say so.
+ok(me.appScopes.granted === GHL_SCOPES.length - 1, "whoami: counts the scopes HighLevel actually granted");
+ok(
+  me.appScopes.missingCount === 1 && me.appScopes.missing[0] === WITHHELD_SCOPE,
+  `whoami: names the one requested scope the install didn't grant (${me.appScopes.missing[0]})`
+);
+ok(!("missingNotShown" in me.appScopes), "whoami: a short missing list isn't truncated");
+ok(/Marketplace app/.test(me.appScopes.note), "whoami: says where to fix a missing scope");
 
 // ---------- catalog operations ----------
 const exec = await call(pair, "execute_operation", {
