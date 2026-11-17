@@ -107,6 +107,13 @@ ok(leaky.length === 0, `no tool description names the CRM behind the connector${
 const init = await rpc("sales", "initialize", {});
 ok(!VENDOR.test(init.instructions || ""), "the server's own instructions don't name it either");
 
+// Upstream error text is the CRM's own words and reaches the client verbatim, so it is the one
+// place a vendor name can arrive without passing through any string in this repo.
+const { deVendor } = await import(`${REPO}/lib/ghl.js`);
+ok(deVendor("Invalid HighLevel location id") === "Invalid EverGreen Junction location id", "an upstream error naming the CRM is relabelled");
+ok(!VENDOR.test(deVendor("See https://highlevel.stoplight.io/docs/x for details")), "an upstream error linking to the CRM drops the link");
+ok(deVendor("Contact not found") === "Contact not found", "an upstream error that names nothing is left alone");
+
 const areasSales = await call("sales", "search_operations", {});
 const areasAdmin = await call("admin", "search_operations", {});
 console.log("  sales areas:", JSON.stringify(areasSales.data.areas), "count", areasSales.data.availableOperations, "| admin count", areasAdmin.data.availableOperations);
