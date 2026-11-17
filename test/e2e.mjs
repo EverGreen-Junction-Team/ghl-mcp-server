@@ -109,6 +109,23 @@ ok(!VENDOR.test(init.instructions || ""), "the server's own instructions don't n
 
 // Upstream error text is the CRM's own words and reaches the client verbatim, so it is the one
 // place a vendor name can arrive without passing through any string in this repo.
+// Reading a custom field's definition is reading the shape of a record, which HighLevel shows to
+// anyone who can open one. Creating or changing a field is still a settings job, and admin-only.
+const { checkOperation } = await import(`${REPO}/lib/access.js`);
+const { OPERATIONS: CAT } = await import(`${REPO}/lib/catalog.generated.js`);
+const op = (id) => CAT.find((o) => o.id === id);
+const settingsNotAdmin = { permissions: { settingsEnabled: true }, roles: { role: "user" } };
+ok(checkOperation(op("locations.get-custom-fields"), USERS.sales).ok, "custom fields: a user without settings can read the definitions");
+const cfWrite = checkOperation(op("locations.create-custom-field"), USERS.sales);
+ok(!cfWrite.ok && /settingsEnabled/.test(cfWrite.reason), "custom fields: that same user still can't create one");
+ok(!checkOperation(op("locations.delete-custom-field"), USERS.sales).ok, "custom fields: nor delete one");
+const cfAdminOnly = checkOperation(op("locations.update-custom-field"), settingsNotAdmin);
+ok(!cfAdminOnly.ok && /admins/.test(cfAdminOnly.reason), "custom fields: settings alone isn't enough to change one, still admin-only");
+ok(checkOperation(op("locations.create-custom-field"), USERS.admin).ok, "custom fields: an admin with settings can still create one");
+// The relaxation is for field definitions only; custom VALUES hold data, not shape.
+ok(!checkOperation(CAT.find((o) => o.resource === "locations/customValues" && o.access === "read"), USERS.sales).ok,
+  "custom values stay behind settingsEnabled: the relaxation didn't spread");
+
 const { deVendor } = await import(`${REPO}/lib/ghl.js`);
 ok(deVendor("Invalid HighLevel location id") === "Invalid EverGreen Junction location id", "an upstream error naming the CRM is relabelled");
 ok(!VENDOR.test(deVendor("See https://highlevel.stoplight.io/docs/x for details")), "an upstream error linking to the CRM drops the link");
