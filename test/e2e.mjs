@@ -196,6 +196,35 @@ ok(last().body.assignedTo === "sales" && last().body.status === "won", "update_o
 const nothing = await call("admin", "update_opportunity", { opportunityId: "o-theirs" });
 ok(nothing.err && /Nothing to change/.test(nothing.text), "update_opportunity: refuses an empty update");
 
+// Custom fields ride on the same opportunities.write as the rest of the update, so they widen
+// nothing -- but they are the only way to set Client type, Product type and the like.
+await call("admin", "update_opportunity", {
+  opportunityId: "o-theirs",
+  customFields: [{ key: "client_type", field_value: "Homeowner" }, { id: "cf1", field_value: ["a", "b"] }],
+});
+ok(
+  last().body.customFields?.[0]?.key === "client_type" && last().body.customFields[0].field_value === "Homeowner",
+  "update_opportunity: sets a custom field by key"
+);
+ok(Array.isArray(last().body.customFields[1].field_value), "update_opportunity: passes a multi-select value through as a list");
+ok(last().body.name === undefined && last().body.status === undefined, "update_opportunity: a custom-field update touches nothing else");
+
+const named = await call("admin", "update_opportunity", {
+  opportunityId: "o-theirs",
+  customFields: [{ field_value: "Homeowner" }],
+});
+ok(named.err && /names no field/.test(named.text), "update_opportunity: refuses a custom field with no id or key");
+
+const emptyCf = await call("admin", "update_opportunity", { opportunityId: "o-theirs", customFields: [] });
+ok(emptyCf.err && /non-empty array/.test(emptyCf.text), "update_opportunity: refuses an empty customFields list");
+
+// The ownership check has to run before the write, not just for the plain fields.
+const cfNotMine = await call("assignedOpp", "update_opportunity", {
+  opportunityId: "o-theirs",
+  customFields: [{ key: "client_type", field_value: "Homeowner" }],
+});
+ok(cfNotMine.err && /assigned to/.test(cfNotMine.text), "assigned-only: can't set custom fields on someone else's deal");
+
 // a user limited to their own records: the limit is which records they can touch,
 // not which fields they can set, so they can hand over one they hold.
 await call("assigned", "update_contact", { contactId: "c-mine", assignedTo: "sales" });
