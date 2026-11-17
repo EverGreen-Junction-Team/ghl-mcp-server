@@ -48,6 +48,12 @@ http.createServer((req, res) => {
     if (u.pathname === "/oauth/installedLocations") {
       return res.end(JSON.stringify({ locations: Object.entries(NAMES).map(([id, name]) => ({ _id: id, name, isInstalled: true })) }));
     }
+    // Both of these refuse the same way. The difference is that the app was granted the scope
+    // one of them needs, and not the scope the other needs.
+    if (/\/tasks\/search$/.test(u.pathname) || /\/customFields$/.test(u.pathname)) {
+      res.statusCode = 401;
+      return res.end(JSON.stringify({ message: "This location does not have access" }));
+    }
     res.end(JSON.stringify({ ok: true }));
   });
 }).listen(4030);
@@ -215,6 +221,23 @@ ok(none.status === 400 && /Choose at least one/.test(none.html), "sign-in: ticki
 const sneaky = await pick(`step=location&v=${encodeURIComponent(verified([{ id: "loc1", name: "Acme" }]))}&lid=loc1&lid=loc2`);
 ok(sneaky.grant && !sneaky.grant.ls && sneaky.grant.lid === "loc1",
   "sign-in: a sub-account the user can't reach is dropped, not connected");
+
+// ---------- a 401 caused by a scope the app never got ----------
+// Both calls below are refused by the CRM with the same 401. Only one of them needs a scope this
+// install wasn't granted, and only that one should be explained as an app problem -- otherwise the
+// explanation would be noise on every unrelated 401.
+const blocked = await call(single, "execute_operation", { operation: "locations.task-search", path: { locationId: "loc1" }, body: {} });
+ok(blocked.err && new RegExp(WITHHELD_SCOPE).test(blocked.text), `401 on a scope the app lacks: names ${WITHHELD_SCOPE}`);
+ok(/Marketplace app/.test(blocked.text) && /reinstall/.test(blocked.text), "401 on a scope the app lacks: says where it's fixed");
+ok(/does not have access/.test(blocked.text), "401 on a scope the app lacks: keeps the CRM's own words too");
+
+const granted = await call(single, "execute_operation", {
+  operation: "locations.get-custom-fields",
+  path: { locationId: "loc1" },
+});
+// Assert it really reached the CRM and got the 401, or the next check would pass for free.
+ok(granted.err && /does not have access/.test(granted.text), "401 on a scope the app HAS: the call did reach the CRM");
+ok(!/wasn't granted/.test(granted.text), "401 on a scope the app HAS: left as it is, not blamed on the app");
 
 console.log(`\n${pass} checks passed`);
 await new Promise((r) => process.stdout.write("", r)); // flush before exit
