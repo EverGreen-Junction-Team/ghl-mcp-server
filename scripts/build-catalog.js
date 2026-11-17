@@ -53,7 +53,41 @@ function inferResource(area, p) {
 
 const CONFIRM_WORDS = /(delete|remove|send|refund|cancel|void|charge|collect|bulk|merge|publish|import|train|crawl)/i;
 
-const clip = (s) => (typeof s === "string" && s.length > MAX_TEXT ? s.slice(0, MAX_TEXT) + "…" : s);
+/**
+ * Clients connect to this as EverGreen Junction and shouldn't be shown the CRM behind it, but
+ * these texts are HighLevel's own and name it -- so far only in documentation links, which the
+ * AI can't follow anyway. Unwrapping each link to the words it was wrapped around removes the
+ * vendor's name and domain while leaving the sentence readable.
+ */
+const unlink = (s) =>
+  typeof s === "string"
+    ? s
+        .replace(/<a\b[^>]*>(.*?)<\/a>/gis, "$1")
+        .replace(/\[([^\]]+)\]\((?:https?:)?\/\/[^)]+\)/gi, "$1")
+        .replace(/<br\s*\/?>/gi, " ")
+        .replace(/[ \t]{2,}/g, " ")
+        .trim()
+    : s;
+
+const VENDOR_HOST = /\bhttps?:\/\/[^\s"'<>)]*\b(?:leadconnectorhq|gohighlevel|highlevel)\b[^\s"'<>)]*/gi;
+const VENDOR_WORD = /\b(?:go)?highlevel\b/gi;
+
+/** unlink, then drop any vendor URL or name the links were hiding. */
+const scrub = (s) =>
+  typeof s === "string" ? unlink(s).replace(VENDOR_HOST, "https://example.com").replace(VENDOR_WORD, "the CRM") : s;
+
+/** The same, everywhere in a nested schema: descriptions and examples are shown by describe_operation too. */
+function scrubDeep(v) {
+  if (typeof v === "string") return scrub(v);
+  if (Array.isArray(v)) return v.map(scrubDeep);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, scrubDeep(x)]));
+  return v;
+}
+
+const clip = (s) => {
+  const t = scrub(s);
+  return typeof t === "string" && t.length > MAX_TEXT ? t.slice(0, MAX_TEXT) + "…" : t;
+};
 
 const fileCache = new Map();
 function loadJson(file) {
@@ -191,7 +225,7 @@ fs.writeFileSync(
     `export const CATALOG_SCOPES = ${JSON.stringify([...scopes].sort())};\n` +
     `export const USER_SCOPE_VOCABULARY = ${JSON.stringify(userScopes)};\n`
 );
-fs.writeFileSync(outFile, header + `export const OPERATIONS = ${JSON.stringify(operations)};\n`);
+fs.writeFileSync(outFile, header + `export const OPERATIONS = ${JSON.stringify(scrubDeep(operations))};\n`);
 console.log(
   `Wrote ${operations.length} operations to ${path.relative(process.cwd(), outFile)}`,
   `and ${scopes.size} scopes to ${path.relative(process.cwd(), scopesFile)}.`,

@@ -99,6 +99,14 @@ ok(["search_operations", "describe_operation", "execute_operation"].every((x) =>
 ok(!names.includes("create_opportunity"), "sales has no opportunities.write -> create_opportunity hidden (existing behaviour)");
 ok(tl.tools.find((t) => t.name === "execute_operation").annotations.destructiveHint === true, "execute_operation is marked destructive");
 
+// Clients connect to this as EverGreen Junction and shouldn't be shown the CRM behind it.
+// tools/list is the most visible surface -- its descriptions end up in the approval dialog.
+const VENDOR = /highlevel|gohighlevel|leadconnector/i;
+const leaky = tl.tools.filter((t) => VENDOR.test(`${t.description || ""} ${JSON.stringify(t.inputSchema)}`));
+ok(leaky.length === 0, `no tool description names the CRM behind the connector${leaky.length ? ": " + leaky.map((t) => t.name).join(", ") : ""}`);
+const init = await rpc("sales", "initialize", {});
+ok(!VENDOR.test(init.instructions || ""), "the server's own instructions don't name it either");
+
 const areasSales = await call("sales", "search_operations", {});
 const areasAdmin = await call("admin", "search_operations", {});
 console.log("  sales areas:", JSON.stringify(areasSales.data.areas), "count", areasSales.data.availableOperations, "| admin count", areasAdmin.data.availableOperations);
