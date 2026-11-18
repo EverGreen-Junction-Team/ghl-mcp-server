@@ -7,6 +7,10 @@ import { pathToFileURL } from "node:url";
 const REPO = pathToFileURL(
   process.argv[2] ? path.resolve(process.argv[2]) : path.dirname(import.meta.dirname),
 ).href;
+// "Assigned only" enforcement is off as shipped (see lib/assigned.js), so this file runs twice:
+// once as it ships, and once with ENFORCE_ASSIGNED_ONLY=true. Both halves are checked, because
+// the gate still exists and turning it back on has to keep working.
+const ENFORCING = process.env.ENFORCE_ASSIGNED_ONLY === "true";
 process.env.TOKEN_SECRET = "x".repeat(40);
 process.env.GHL_API_BASE = "http://127.0.0.1:4010";
 process.env.BASE_URL = "http://127.0.0.1:4011";
@@ -177,9 +181,16 @@ const e9 = await call("admin", "execute_operation", { operation: "locations.get-
 ok(!e9.err && last().path === "/locations/loc1", "path locationId filled in");
 
 const a1 = await call("assigned", "execute_operation", { operation: "contacts.get-contact", path: { contactId: "c1" } });
-ok(a1.err && /assigned to you/.test(a1.text), "assigned-only user can't use catalog contacts");
 const a2 = await call("assigned", "get_contact", { contactId: "c-other" });
-ok(a2.err && /assigned to you/.test(a2.text), "built-in get_contact still enforces assignment");
+if (ENFORCING) {
+  ok(a1.err && /assigned to you/.test(a1.text), "enforced: assigned-only user can't use catalog contacts");
+  ok(a2.err && /assigned to you/.test(a2.text), "enforced: built-in get_contact still enforces assignment");
+} else {
+  // The reason the gate is off: it took the catalog away from a user whose permissions and
+  // scopes were in order, on their own records as much as anyone else's.
+  ok(!a1.err, "as shipped: an assigned-only user reaches the catalog: " + a1.text);
+  ok(!a2.err, "as shipped: an assigned-only user reads a colleague's contact: " + a2.text);
+}
 
 const p1 = await call("shop", "execute_operation", { operation: "products.delete-product-by-id", path: { productId: "p1" }, confirm: true });
 ok(p1.err && /products.delete/.test(p1.text), "products.write without products.delete can't delete: " + p1.text);
@@ -240,22 +251,29 @@ const cfNotMine = await call("assignedOpp", "update_opportunity", {
   opportunityId: "o-theirs",
   customFields: [{ key: "client_type", field_value: "Homeowner" }],
 });
-ok(cfNotMine.err && /assigned to/.test(cfNotMine.text), "assigned-only: can't set custom fields on someone else's deal");
+const notTheirs = await call("assigned", "update_contact", { contactId: "c1", assignedTo: "sales" });
+const notMine = await call("assignedOpp", "update_opportunity", { opportunityId: "o-theirs", status: "won" });
+if (ENFORCING) {
+  ok(cfNotMine.err && /assigned to/.test(cfNotMine.text), "enforced: can't set custom fields on someone else's deal");
+  ok(notTheirs.err && /only change contacts assigned to you/.test(notTheirs.text),
+    "enforced: still can't touch a contact that isn't theirs");
+  ok(notMine.err && /only change opportunities assigned to you/.test(notMine.text), "enforced: can't change someone else's deal");
+} else {
+  ok(!cfNotMine.err, "as shipped: sets custom fields on a colleague's deal: " + cfNotMine.text);
+  ok(!notTheirs.err, "as shipped: changes a contact that isn't theirs: " + notTheirs.text);
+  ok(!notMine.err, "as shipped: changes a colleague's deal: " + notMine.text);
+}
 
 // a user limited to their own records: the limit is which records they can touch,
 // not which fields they can set, so they can hand over one they hold.
 await call("assigned", "update_contact", { contactId: "c-mine", assignedTo: "sales" });
 ok(last().method === "PUT" && last().path === "/contacts/c-mine" && last().body.assignedTo === "sales",
   "assigned-only: can hand a contact they hold to someone else");
-const notTheirs = await call("assigned", "update_contact", { contactId: "c1", assignedTo: "sales" });
-ok(notTheirs.err && /only change contacts assigned to you/.test(notTheirs.text),
-  "assigned-only: still can't touch a contact that isn't theirs");
 await call("assigned", "create_contact", { firstName: "A", assignedTo: "sales" });
 ok(last().body.assignedTo === "sales", "assigned-only: can create a contact for someone else");
 await call("assigned", "create_contact", { firstName: "A" });
-ok(last().body.assignedTo === "assigned", "assigned-only: new contacts still come to them by default");
-const notMine = await call("assignedOpp", "update_opportunity", { opportunityId: "o-theirs", status: "won" });
-ok(notMine.err && /only change opportunities assigned to you/.test(notMine.text), "assigned-only: can't change someone else's deal");
+ok(last().body.assignedTo === (ENFORCING ? "assigned" : undefined),
+  ENFORCING ? "enforced: new contacts come to them by default" : "as shipped: a new contact picks up no owner of its own");
 await call("assignedOpp", "update_opportunity", { opportunityId: "o-mine", status: "won" });
 ok(last().method === "PUT" && last().body.status === "won", "assigned-only: can change their own deal");
 await call("assignedOpp", "update_opportunity", { opportunityId: "o-mine", assignedTo: "sales" });
@@ -282,8 +300,12 @@ const emptyAppt = await call("admin", "update_appointment", { appointmentId: "ap
 ok(emptyAppt.err && /Nothing to change/.test(emptyAppt.text), "update_appointment: refuses an empty update");
 
 const otherAppt = await call("assignedCal", "update_appointment", { appointmentId: "ap-theirs", startTime: "2026-11-21T10:00:00+00:00" });
-ok(otherAppt.err && /only change appointments assigned to you/.test(otherAppt.text),
-  "assigned-only: can't touch an appointment that isn't theirs");
+if (ENFORCING) {
+  ok(otherAppt.err && /only change appointments assigned to you/.test(otherAppt.text),
+    "enforced: can't touch an appointment that isn't theirs");
+} else {
+  ok(!otherAppt.err, "as shipped: reschedules a colleague's appointment: " + otherAppt.text);
+}
 
 await call("assignedCal", "update_appointment", { appointmentId: "ap-mine", startTime: "2026-11-21T10:00:00+00:00" });
 ok(last().method === "PUT" && last().path === "/calendars/events/appointments/ap-mine", "assigned-only: can reschedule their own appointment");
@@ -292,19 +314,33 @@ await call("assignedCal", "update_appointment", { appointmentId: "ap-mine", assi
 ok(last().body.assignedUserId === "sales", "assigned-only: can hand an appointment they hold to someone else");
 
 await call("assignedCal", "create_appointment", { calendarId: "cal1", contactId: "c1", startTime: "2026-11-20T09:00:00+00:00" });
-ok(last().body.assignedUserId === "assignedCal", "assigned-only: new appointments come to them by default");
+ok(last().body.assignedUserId === (ENFORCING ? "assignedCal" : undefined),
+  ENFORCING ? "enforced: new appointments come to them by default" : "as shipped: a new appointment picks up no owner of its own");
 
 // ---------- what a refusal actually says ----------
+// Only reachable with the gate on, but the wording is the whole point of these refusals, so
+// it stays tested rather than being deleted along with the default behaviour.
 const refused = await call("scoped", "update_contact", { contactId: "c-other", firstName: "X" });
-ok(refused.err, "scope-limited user: refused on someone else's contact");
-ok(/user someone/.test(refused.text), "refusal: names who holds the record");
-ok(/contacts\.write/.test(refused.text) && /assigned-only/.test(refused.text), "refusal: names the HighLevel setting behind it");
-ok(/list_users/.test(refused.text), "refusal: says how to find out who that is");
-ok(/can only change/.test(refused.text) && !/only access/.test(refused.text), "refusal: says change, not access");
-
 const unseen = await call("assigned", "get_contact", { contactId: "c-other" });
-ok(/can only see/.test(unseen.text) && /only assigned data/.test(unseen.text),
-  "refusal on a read: says see, and names the blanket setting");
+if (ENFORCING) {
+  ok(refused.err, "scope-limited user: refused on someone else's contact");
+  ok(/user someone/.test(refused.text), "refusal: names who holds the record");
+  ok(/contacts\.write/.test(refused.text) && /assigned-only/.test(refused.text), "refusal: names the setting behind it");
+  ok(/list_users/.test(refused.text), "refusal: says how to find out who that is");
+  ok(/can only change/.test(refused.text) && !/only access/.test(refused.text), "refusal: says change, not access");
+  ok(/can only see/.test(unseen.text) && /only assigned data/.test(unseen.text),
+    "refusal on a read: says see, and names the blanket setting");
+} else {
+  ok(!refused.err, "as shipped: a scope-limited user changes a colleague's contact: " + refused.text);
+  ok(!unseen.err, "as shipped: nothing is withheld on a read: " + unseen.text);
+}
+
+// whoami keeps reporting the setting even where it isn't acted on, so it can still be seen.
+const wa = await call("assigned", "whoami", {});
+ok(wa.data.assignedDataOnly === true && wa.data.assignedOnlyDeclaredForChanging.includes("contacts"),
+  "whoami: reports what the CRM says about assigned-only");
+ok(wa.data.assignedOnlyEnforcedHere === ENFORCING && wa.data.assignedOnlyForChanging.includes("contacts") === ENFORCING,
+  "whoami: says separately whether this server acts on it");
 
 console.log(`\n${pass} checks passed`);
 await new Promise((r) => process.stdout.write("", r)); // flush before exit
