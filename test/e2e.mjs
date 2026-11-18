@@ -287,6 +287,22 @@ ok(last().method === "PUT" && last().body.status === "won", "assigned-only: can 
 await call("assignedOpp", "update_opportunity", { opportunityId: "o-mine", assignedTo: "sales" });
 ok(last().body.assignedTo === "sales", "assigned-only: can hand a deal they hold to someone else");
 
+// ---------- scopes the CRM won't grant ----------
+// Asking for one of these fails the whole install with invalid_scope, before any consent
+// screen, so the install link must never carry them and the operations needing them must
+// not be offered as though a permission could fix them.
+const { GHL_SCOPES, UNGRANTABLE_SCOPES } = await import(`${REPO}/lib/ghl.js`);
+ok(UNGRANTABLE_SCOPES.size > 0 && ![...UNGRANTABLE_SCOPES].some((x) => GHL_SCOPES.includes(x)),
+  "install asks for no scope the CRM rejects");
+const aiAgent = await call("admin", "execute_operation", { operation: "conversation-ai.get-agent", path: { id: "a1" } });
+ok(aiAgent.err && /can't be granted to this app/.test(aiAgent.text),
+  "an operation whose only scope is ungrantable is refused, and says why");
+const mkUser = await call("admin", "execute_operation", { operation: "users.create-user", body: {}, confirm: true });
+ok(mkUser.err && /can't be granted to this app/.test(mkUser.text), "same for creating a user");
+// Reading users shares the area but not the scope, so it must be untouched.
+const readUser = await call("admin", "execute_operation", { operation: "users.get-user", path: { userId: "sales" } });
+ok(!readUser.err, "reading a user, which needs a different scope, still works: " + readUser.text);
+
 // ---------- notes and tasks ----------
 // The point of these tools: an assigned-only user was refused every one of these in the
 // catalog, on his own contacts as much as anyone's, because the catalog holds ids, not owners.
