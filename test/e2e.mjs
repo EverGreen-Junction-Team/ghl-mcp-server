@@ -60,6 +60,14 @@ http.createServer((req, res) => {
         { id: "gone", name: "Old User", email: "old@x.test", deleted: true },
       ] }));
     }
+    // Before the contact routes below, which match any path under a contact id.
+    if (/^\/contacts\/[^/]+\/notes/.test(u.pathname) && req.method === "GET") {
+      return res.end(JSON.stringify({ notes: [{ id: "n1", body: "Called him back", userId: "sales" }] }));
+    }
+    if (/^\/contacts\/[^/]+\/tasks/.test(u.pathname) && req.method === "GET") {
+      return res.end(JSON.stringify({ tasks: [{ id: "t1", title: "Chase the survey", dueDate: "2026-11-25T11:00:00Z", completed: false, assignedTo: "sales" }] }));
+    }
+    if (/^\/contacts\/[^/]+\/(notes|tasks)/.test(u.pathname)) return res.end(JSON.stringify({ ok: true }));
     if (u.pathname.startsWith("/contacts/c-mine")) return res.end(JSON.stringify({ contact: { id: "c-mine", assignedTo: "assigned" } }));
     if (u.pathname.startsWith("/opportunities/o-mine")) return res.end(JSON.stringify({ opportunity: { id: "o-mine", assignedTo: "assignedOpp", pipelineId: "p1" } }));
     if (u.pathname.startsWith("/opportunities/o-theirs")) return res.end(JSON.stringify({ opportunity: { id: "o-theirs", assignedTo: "someone", pipelineId: "p1" } }));
@@ -278,6 +286,63 @@ await call("assignedOpp", "update_opportunity", { opportunityId: "o-mine", statu
 ok(last().method === "PUT" && last().body.status === "won", "assigned-only: can change their own deal");
 await call("assignedOpp", "update_opportunity", { opportunityId: "o-mine", assignedTo: "sales" });
 ok(last().body.assignedTo === "sales", "assigned-only: can hand a deal they hold to someone else");
+
+// ---------- notes and tasks ----------
+// The point of these tools: an assigned-only user was refused every one of these in the
+// catalog, on his own contacts as much as anyone's, because the catalog holds ids, not owners.
+// Here the contact is loaded first, so ownership is decided on the record itself.
+const noteTaskTools = (await rpc("assigned", "tools/list")).tools.map((t) => t.name);
+for (const t of ["list_contact_notes", "update_contact_note", "delete_contact_note",
+                 "list_contact_tasks", "create_contact_task", "update_contact_task", "delete_contact_task"]) {
+  ok(noteTaskTools.includes(t), `tools/list offers ${t}`);
+}
+
+const notes = await call("sales", "list_contact_notes", { contactId: "c1" });
+ok(notes.data.notes?.[0]?.id === "n1" && last().path === "/contacts/c1/notes", "list_contact_notes: reads the notes");
+
+await call("sales", "add_contact_note", { contactId: "c1", note: "Spoke to him" });
+ok(last().method === "POST" && last().body.body === "Spoke to him" && last().body.userId === "sales",
+  "add_contact_note: the author defaults to the signed-in user");
+await call("sales", "add_contact_note", { contactId: "c1", note: "For Ada", authorId: "admin" });
+ok(last().body.userId === "admin", "add_contact_note: the author can be someone else");
+
+await call("sales", "update_contact_note", { contactId: "c1", noteId: "n1", note: "Corrected" });
+ok(last().method === "PUT" && last().path === "/contacts/c1/notes/n1" && last().body.body === "Corrected",
+  "update_contact_note: edits the text");
+const emptyNote = await call("sales", "update_contact_note", { contactId: "c1", noteId: "n1" });
+ok(emptyNote.err && /Nothing to change/.test(emptyNote.text), "update_contact_note: refuses an empty update");
+
+await call("sales", "delete_contact_note", { contactId: "c1", noteId: "n1" });
+ok(last().method === "DELETE" && last().path === "/contacts/c1/notes/n1", "delete_contact_note: deletes it");
+
+const tasks = await call("sales", "list_contact_tasks", { contactId: "c1" });
+ok(tasks.data.tasks?.[0]?.id === "t1" && last().path === "/contacts/c1/tasks", "list_contact_tasks: reads the tasks");
+
+await call("sales", "create_contact_task", { contactId: "c1", title: "Chase survey", dueDate: "2026-11-25T11:00:00Z" });
+ok(last().method === "POST" && last().path === "/contacts/c1/tasks", "create_contact_task: posts to the tasks endpoint");
+ok(last().body.title === "Chase survey" && last().body.dueDate === "2026-11-25T11:00:00Z" && last().body.completed === false,
+  "create_contact_task: carries title, due date and the completed flag the API requires");
+ok(last().body.assignedTo === "sales", "create_contact_task: a task with no owner falls to whoever asked");
+await call("sales", "create_contact_task", { contactId: "c1", title: "For Ada", dueDate: "2026-11-25T11:00:00Z", assignedTo: "admin" });
+ok(last().body.assignedTo === "admin", "create_contact_task: can be raised for someone else");
+
+await call("sales", "update_contact_task", { contactId: "c1", taskId: "t1", completed: true });
+ok(last().method === "PUT" && last().path === "/contacts/c1/tasks/t1" && last().body.completed === true,
+  "update_contact_task: marks a task done");
+await call("sales", "update_contact_task", { contactId: "c1", taskId: "t1", dueDate: "2026-12-01T09:00:00Z", assignedTo: "admin" });
+ok(last().body.dueDate === "2026-12-01T09:00:00Z" && last().body.assignedTo === "admin" && last().body.completed === undefined,
+  "update_contact_task: moves the date and hands it over, touching nothing else");
+const emptyTask = await call("sales", "update_contact_task", { contactId: "c1", taskId: "t1" });
+ok(emptyTask.err && /Nothing to change/.test(emptyTask.text), "update_contact_task: refuses an empty update");
+
+await call("sales", "delete_contact_task", { contactId: "c1", taskId: "t1" });
+ok(last().method === "DELETE" && last().path === "/contacts/c1/tasks/t1", "delete_contact_task: deletes it");
+
+// The report's actual complaint: refused on his own contact. c-mine belongs to "assigned".
+const ownTask = await call("assigned", "create_contact_task", { contactId: "c-mine", title: "Mine", dueDate: "2026-11-25T11:00:00Z" });
+ok(!ownTask.err && last().path === "/contacts/c-mine/tasks", "an assigned-only user can raise a task on their own contact: " + ownTask.text);
+const ownNote = await call("assigned", "update_contact_note", { contactId: "c-mine", noteId: "n1", note: "Mine" });
+ok(!ownNote.err && last().path === "/contacts/c-mine/notes/n1", "an assigned-only user can edit a note on their own contact: " + ownNote.text);
 
 // ---------- appointments ----------
 const calTools = (await rpc("assignedCal", "tools/list")).tools.map((t) => t.name);
