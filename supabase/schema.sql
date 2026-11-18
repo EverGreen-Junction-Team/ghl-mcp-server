@@ -15,6 +15,21 @@ create table if not exists public.mcp_agency (
 );
 alter table public.mcp_agency enable row level security;
 
+-- A sub-account access token per installed location, minted from the agency token and renewed
+-- daily by the /cron/refresh job. These are live credentials at rest -- service role only, RLS
+-- on, no policies, same as mcp_agency. Dropping this table is safe: the server falls back to
+-- minting a token on demand, which is how it worked before.
+create table if not exists public.mcp_location (
+  location_id    text primary key,
+  company_id     text not null,
+  access_token   text not null,
+  expires_at     timestamptz not null,
+  name           text,
+  updated_at     timestamptz not null default now()
+);
+alter table public.mcp_location enable row level security;
+create index if not exists mcp_location_company_idx on public.mcp_location (company_id);
+
 -- Who did what: every sign-in and every tool call.
 create table if not exists public.mcp_audit_log (
   id           bigint generated always as identity primary key,
@@ -56,4 +71,4 @@ select at, event, user_name, user_email, location_name, tool, ok, error, args, d
 from public.mcp_audit_log
 order by at desc;
 
-revoke all on public.mcp_agency, public.mcp_audit_log, public.mcp_activity, public.mcp_revoked from anon, authenticated;
+revoke all on public.mcp_agency, public.mcp_location, public.mcp_audit_log, public.mcp_activity, public.mcp_revoked from anon, authenticated;

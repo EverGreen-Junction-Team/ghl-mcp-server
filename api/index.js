@@ -76,6 +76,20 @@ export default async function handler(req, res) {
         return sendAsset(res, "image/svg+xml", LOGO_SVG);
       case "/logo.png":
         return sendAsset(res, "image/png", LOGO_PNG);
+      case "/cron/refresh": {
+        // Vercel Cron sends `Authorization: Bearer $CRON_SECRET`. With no secret set this
+        // stays shut rather than open: anyone could otherwise spend the refresh token.
+        const secret = process.env.CRON_SECRET;
+        if (!secret) return sendJson(res, 503, { error: "CRON_SECRET isn't set on this deployment." });
+        if (req.headers.authorization !== `Bearer ${secret}`) return sendJson(res, 401, { error: "unauthorized" });
+        const { renewAgencyToken, primeLocationTokens } = await import("../lib/agency.js");
+        const agency = await renewAgencyToken();
+        // The sub-account tokens are minted from the agency token, so they are renewed after
+        // it, never before: priming first would spend a token that is about to be replaced.
+        const subAccounts = await primeLocationTokens();
+        console.log("cron/refresh:", JSON.stringify({ agency: agency.note, ...subAccounts, storedSubAccounts: undefined }));
+        return sendJson(res, 200, { ok: true, agency, subAccounts });
+      }
       case "/health":
         // The commit and when it went out, so you can tell whether a fix is actually live.
         return sendJson(res, 200, {

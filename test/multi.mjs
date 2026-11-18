@@ -32,6 +32,7 @@ const USERS = {
 const NAMES = { loc1: "Acme", loc2: "Globex", loc3: "Initech" };
 
 const seen = [];
+const locRows = new Map(); // what the server stored in mcp_location
 http.createServer((req, res) => {
   let b = "";
   req.on("data", (c) => (b += c));
@@ -66,6 +67,17 @@ http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
     if (u.pathname === "/rest/v1/mcp_agency") {
       return res.end(JSON.stringify([{ company_id: "comp1", access_token: "agency-at", refresh_token: "r", scope: GRANTED_SCOPES, expires_at: new Date(Date.now() + 864e5).toISOString() }]));
+    }
+    // The sub-account token store, kept in memory here so a test can see what was written.
+    if (u.pathname === "/rest/v1/mcp_location") {
+      if (req.method === "POST") {
+        for (const row of [].concat(JSON.parse(b))) locRows.set(row.location_id, row);
+        res.statusCode = 201;
+        return res.end("");
+      }
+      const want = (u.searchParams.get("location_id") || "").replace(/^eq\./, "");
+      const row = locRows.get(want);
+      return res.end(JSON.stringify(row ? [row] : []));
     }
     if (req.method === "POST") { res.statusCode = 201; return res.end(""); }
     res.end("[]");
@@ -238,6 +250,56 @@ const granted = await call(single, "execute_operation", {
 // Assert it really reached the CRM and got the 401, or the next check would pass for free.
 ok(granted.err && /does not have access/.test(granted.text), "401 on a scope the app HAS: the call did reach the CRM");
 ok(!/wasn't granted/.test(granted.text), "401 on a scope the app HAS: left as it is, not blamed on the app");
+
+// ---------- the sub-account token store ----------
+// Tokens are stored so a cold container and a quiet week don't each cost a mint. What matters
+// is that the store can never hold a request back: a miss, a stale row or a dead database all
+// have to end with a freshly minted token rather than an error.
+const { forgetLocationTokens } = await import(`${REPO}/lib/agency.js`);
+const mints = (lid) => seen.filter((r) => r.path === "/oauth/locationToken" && new URLSearchParams(r.body).get("locationId") === lid).length;
+
+locRows.clear();
+forgetLocationTokens();
+const before = mints("loc2");
+await call(every, "search_contacts", { query: "a", locationId: "loc2" });
+ok(mints("loc2") === before + 1, "store: a sub-account with nothing stored is minted");
+ok(locRows.get("loc2")?.access_token === "at-loc2", "store: and the minted token is written to mcp_location");
+ok(new Date(locRows.get("loc2").expires_at).getTime() > Date.now(), "store: with the expiry it was minted with");
+
+// A stored token is only worth having if it is actually used, and only safe if its expiry is
+// honoured. Both are checked here by making the stored value something a mint would never give.
+locRows.set("loc3", { location_id: "loc3", company_id: "comp1", access_token: "stored-loc3", expires_at: new Date(Date.now() + 864e5).toISOString() });
+forgetLocationTokens();
+const beforeStored = mints("loc3");
+await call(every, "search_contacts", { query: "a", locationId: "loc3" });
+ok(mints("loc3") === beforeStored, "store: a stored token that is still valid is used, not re-minted");
+
+locRows.set("loc3", { location_id: "loc3", company_id: "comp1", access_token: "stale-loc3", expires_at: new Date(Date.now() - 1000).toISOString() });
+forgetLocationTokens();
+const beforeStale = mints("loc3");
+await call(every, "search_contacts", { query: "a", locationId: "loc3" });
+ok(mints("loc3") === beforeStale + 1, "store: an expired stored token is replaced, not handed out");
+ok(locRows.get("loc3").access_token === "at-loc3", "store: and the replacement is what got written back");
+
+// ---------- the daily cron ----------
+const cron = (headers) => fetch("http://127.0.0.1:4031/cron/refresh", { headers });
+delete process.env.CRON_SECRET;
+ok((await cron({})).status === 503, "cron: shut, not open, when no secret is configured");
+process.env.CRON_SECRET = "s3cret";
+ok((await cron({})).status === 401, "cron: refuses a call with no secret");
+ok((await cron({ Authorization: "Bearer wrong" })).status === 401, "cron: refuses the wrong secret");
+
+locRows.clear();
+forgetLocationTokens();
+const ran = await cron({ Authorization: "Bearer s3cret" });
+const body = await ran.json();
+ok(ran.status === 200 && body.ok === true, "cron: runs with the right secret");
+ok(body.subAccounts.installedSubAccounts === 3 && body.subAccounts.stored === 3,
+  "cron: stores a token for every sub-account the app is installed in");
+ok(["loc1", "loc2", "loc3"].every((l) => locRows.get(l)?.access_token === `at-${l}`),
+  "cron: and each one is the sub-account's own token, not the agency's");
+ok(typeof body.agency.expiresAt === "string", "cron: reports where the agency token now stands");
+delete process.env.CRON_SECRET;
 
 console.log(`\n${pass} checks passed`);
 await new Promise((r) => process.stdout.write("", r)); // flush before exit
