@@ -287,6 +287,47 @@ ok(last().method === "PUT" && last().body.status === "won", "assigned-only: can 
 await call("assignedOpp", "update_opportunity", { opportunityId: "o-mine", assignedTo: "sales" });
 ok(last().body.assignedTo === "sales", "assigned-only: can hand a deal they hold to someone else");
 
+// ---------- dry run, and telling similar operations apart ----------
+// A dry run has to be safe on the most dangerous operation there is: one that needs
+// confirmation. Showing the request is how you decide whether to confirm, so it must not
+// itself require confirmation -- and it must send nothing.
+const sentBefore = seen.length;
+const dry = await call("admin", "execute_operation", {
+  operation: "contacts.delete-contact", path: { contactId: "c1" }, dryRun: true,
+});
+ok(!dry.err && dry.data.dryRun === true, "dryRun: works on an operation that needs confirmation, without confirm");
+ok(seen.length === sentBefore, "dryRun: nothing was sent to the CRM");
+ok(dry.data.wouldSend.method === "DELETE" && dry.data.wouldSend.path === "/contacts/c1",
+  "dryRun: shows the exact request it would make");
+ok(dry.data.needsConfirmation === true, "dryRun: still says confirmation is needed to run it");
+const refusedNoConfirm = await call("admin", "execute_operation", { operation: "contacts.delete-contact", path: { contactId: "c1" } });
+ok(refusedNoConfirm.err && /dryRun/.test(refusedNoConfirm.text), "the confirmation refusal points at dryRun");
+
+const found = await call("admin", "search_operations", { query: "contact", limit: 4 });
+ok(found.data.operations.every((o) => Array.isArray(o.takes)), "search: says what each operation needs");
+ok(found.data.operations.some((o) => o.takes.includes("contactId")) && found.data.operations.some((o) => !o.takes.length),
+  "search: which is what tells 'one record' and 'all records' apart");
+ok(/match equally well/.test(found.data.choosing || ""), "search: when matches tie, says what to choose on");
+// White-labelling: no link anywhere unless the agency's own CRM address is configured.
+ok(found.data.operations.every((o) => o.openInCrm === undefined), "search: no CRM link without CRM_APP_URL");
+
+// ---------- reading the shape of the sub-account ----------
+// Same rule as custom fields: a user who can open a record can see what shape it is.
+const schema = await call("sales", "execute_operation", { operation: "objects.get-object-by-location-id" });
+ok(!schema.err, "a user without settingsEnabled can list the objects in the sub-account: " + schema.text);
+const schemaWrite = await call("sales", "execute_operation", { operation: "objects.update-custom-object", path: { key: "custom_objects.job" }, body: {}, confirm: true });
+ok(schemaWrite.err && /settingsEnabled/.test(schemaWrite.text),
+  "but changing an object definition still needs the settings permission");
+// And settings alone isn't enough either -- defining objects stays an admin job.
+const { checkOperation: canDo } = await import(`${REPO}/lib/access.js`);
+const { OPERATIONS: ALL } = await import(`${REPO}/lib/catalog.generated.js`);
+const settingsNoAdmin = { roles: { role: "user" }, permissions: { contactsEnabled: true, settingsEnabled: true }, scopes: [] };
+const defineObj = ALL.find((o) => o.id === "objects.update-custom-object");
+const readObj = ALL.find((o) => o.id === "objects.get-object-schema-by-key");
+ok(!canDo(defineObj, settingsNoAdmin).ok && /admin/.test(canDo(defineObj, settingsNoAdmin).reason),
+  "settings without admin still can't define an object");
+ok(canDo(readObj, settingsNoAdmin).ok, "but reading its schema is fine");
+
 // ---------- scopes the CRM won't grant ----------
 // Asking for one of these fails the whole install with invalid_scope, before any consent
 // screen, so the install link must never carry them and the operations needing them must

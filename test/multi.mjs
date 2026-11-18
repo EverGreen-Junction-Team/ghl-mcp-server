@@ -33,6 +33,7 @@ const NAMES = { loc1: "Acme", loc2: "Globex", loc3: "Initech" };
 
 const seen = [];
 const locRows = new Map(); // what the server stored in mcp_location
+const idemRows = new Map(); // what the server stored in mcp_idempotency
 http.createServer((req, res) => {
   let b = "";
   req.on("data", (c) => (b += c));
@@ -67,6 +68,24 @@ http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
     if (u.pathname === "/rest/v1/mcp_agency") {
       return res.end(JSON.stringify([{ company_id: "comp1", access_token: "agency-at", refresh_token: "r", scope: GRANTED_SCOPES, expires_at: new Date(Date.now() + 864e5).toISOString() }]));
+    }
+    // The idempotency claims, same idea: in memory so a test can watch them.
+    if (u.pathname === "/rest/v1/mcp_idempotency") {
+      if (req.method === "POST") {
+        const row = [].concat(JSON.parse(b))[0];
+        if (idemRows.has(row.id)) { res.statusCode = 409; return res.end(JSON.stringify({ message: "duplicate key" })); }
+        idemRows.set(row.id, row);
+        res.statusCode = 201;
+        return res.end("");
+      }
+      const id = (u.searchParams.get("id") || "").replace(/^eq\./, "");
+      if (req.method === "DELETE") { idemRows.delete(id); return res.end(""); }
+      if (req.method === "PATCH") {
+        idemRows.set(id, { ...idemRows.get(id), ...JSON.parse(b) });
+        return res.end(JSON.stringify([idemRows.get(id)]));
+      }
+      const row = idemRows.get(id);
+      return res.end(JSON.stringify(row ? [row] : []));
     }
     // The sub-account token store, kept in memory here so a test can see what was written.
     if (u.pathname === "/rest/v1/mcp_location") {
@@ -300,6 +319,41 @@ ok(["loc1", "loc2", "loc3"].every((l) => locRows.get(l)?.access_token === `at-${
   "cron: and each one is the sub-account's own token, not the agency's");
 ok(typeof body.agency.expiresAt === "string", "cron: reports where the agency token now stands");
 delete process.env.CRON_SECRET;
+
+// ---------- making a write safe to retry ----------
+// The case this exists for: the write lands, the answer is lost, and the caller tries again.
+// The second attempt must return the first one's result rather than creating a second record.
+const writes = () => seen.filter((r) => r.method === "POST" && r.path === "/contacts/").length;
+idemRows.clear();
+const first = await call(single, "execute_operation", {
+  operation: "contacts.create-contact", body: { firstName: "Ida" }, idempotencyKey: "k-1",
+});
+const afterFirst = writes();
+ok(!first.err && afterFirst > 0, "idempotency: the first call runs: " + first.text);
+
+const again = await call(single, "execute_operation", {
+  operation: "contacts.create-contact", body: { firstName: "Ida" }, idempotencyKey: "k-1",
+});
+ok(writes() === afterFirst, "idempotency: the same key doesn't write a second time");
+ok(again.data?.idempotentReplay === true, "idempotency: and the first result comes back, marked as a replay");
+
+const other = await call(single, "execute_operation", {
+  operation: "contacts.create-contact", body: { firstName: "Ivor" }, idempotencyKey: "k-2",
+});
+ok(!other.err && writes() === afterFirst + 1, "idempotency: a different key is a different action");
+
+// A key that failed must not be remembered as a result, or the retry it exists for can't run.
+idemRows.clear();
+const failed = await call(single, "execute_operation", {
+  operation: "locations.task-search", path: { locationId: "loc1" }, body: {}, idempotencyKey: "k-3",
+});
+ok(failed.err, "idempotency: a failing write still fails");
+ok(idemRows.size === 0, "idempotency: and its key is released, so it can be retried");
+
+// Reads are repeatable already; keying one would only risk serving a stale answer.
+idemRows.clear();
+await call(single, "execute_operation", { operation: "contacts.get-contact", path: { contactId: "c1" }, idempotencyKey: "k-4" });
+ok(idemRows.size === 0, "idempotency: reads aren't recorded at all");
 
 console.log(`\n${pass} checks passed`);
 await new Promise((r) => process.stdout.write("", r)); // flush before exit

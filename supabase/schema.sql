@@ -54,6 +54,21 @@ create index if not exists mcp_audit_log_at_idx on public.mcp_audit_log (at desc
 create index if not exists mcp_audit_log_user_idx on public.mcp_audit_log (user_id, at desc);
 create index if not exists mcp_audit_log_location_idx on public.mcp_audit_log (location_id, at desc);
 
+-- Idempotency claims for execute_operation: one row per key, so a retried write returns the
+-- first attempt's result instead of running twice. Rows older than an hour are ignored and
+-- replaced; the cleanup below is optional housekeeping, not required for correctness.
+create table if not exists public.mcp_idempotency (
+  id           text primary key,
+  location_id  text,
+  user_id      text,
+  operation    text,
+  status       text not null,          -- running | done
+  result       jsonb,
+  at           timestamptz not null default now()
+);
+alter table public.mcp_idempotency enable row level security;
+create index if not exists mcp_idempotency_at_idx on public.mcp_idempotency (at);
+
 -- Disconnected sign-ins (one row per "Disconnect" in the AI app). Their tokens stop working.
 create table if not exists public.mcp_revoked (
   gid          text primary key,
@@ -71,4 +86,4 @@ select at, event, user_name, user_email, location_name, tool, ok, error, args, d
 from public.mcp_audit_log
 order by at desc;
 
-revoke all on public.mcp_agency, public.mcp_location, public.mcp_audit_log, public.mcp_activity, public.mcp_revoked from anon, authenticated;
+revoke all on public.mcp_agency, public.mcp_location, public.mcp_idempotency, public.mcp_audit_log, public.mcp_activity, public.mcp_revoked from anon, authenticated;
